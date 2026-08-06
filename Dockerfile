@@ -1,105 +1,55 @@
 FROM alpine:latest
 
-# 1. تثبيت الحزم المطلوبة
-RUN apk add --no-cache curl unzip ca-certificates
+# تثبيت الأدوات اللازمة
+RUN apk add --no-cache curl bash jq
 
-# 2. تحميل وتثبيت أحدث إصدار من Xray-core تلقائياً حسب المعمارية
-RUN ARCH=$(uname -m) && \
-    case "${ARCH}" in \
-        x86_64) XARCH="64" ;; \
-        aarch64) XARCH="arm64-v8a" ;; \
-        *) XARCH="64" ;; \
-    esac && \
-    curl -Lo /tmp/xray.zip https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-${XARCH}.zip && \
-    unzip /tmp/xray.zip -d /tmp/xray && \
-    mv /tmp/xray/xray /usr/local/bin/xray && \
+# تحميل أحدث إصدار من Xray
+RUN bash -c "curl -L https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip -o xray.zip && \
+    unzip xray.zip && \
+    mv xray /usr/local/bin/ && \
     chmod +x /usr/local/bin/xray && \
-    mkdir -p /etc/xray && \
-    rm -rf /tmp/xray*
+    rm -rf xray.zip geoip.dat geosite.dat"
 
-# 3. إنشاء سكريبت التشغيل التلقائي وكتابة الإعدادات داخل نفس الملف
-RUN cat <<'EOF' > /entrypoint.sh
-#!/bin/sh
-set -e
-
-# قراءة البورت من Railway أو استخدام 8080 كافتراضي
-PORT="${PORT:-8080}"
-
-# استخدام UUID المحدد في البيئة أو توليد واحد جديد تلقائياً
-if [ -z "$UUID" ]; then
-    UUID=$(/usr/local/bin/xray uuid)
-fi
-
-# مسار الـ WebSocket
-WSPATH="${WSPATH:-/vless}"
-
-# إنشاء ملف config.json ديناميكياً
-cat <<JSON > /etc/xray/config.json
-{
-  "log": {
-    "loglevel": "warning"
-  },
-  "inbounds": [
-    {
-      "port": ${PORT},
-      "listen": "0.0.0.0",
-      "protocol": "vless",
-      "settings": {
-        "clients": [
-          {
-            "id": "${UUID}"
-          }
-        ],
-        "decryption": "none"
-      },
-      "streamSettings": {
-        "network": "ws",
-        "wsSettings": {
-          "path": "${WSPATH}"
-        }
-      }
-    }
-  ],
-  "outbounds": [
-    {
-      "protocol": "freedom",
-      "tag": "direct"
-    }
-  ]
-}
-JSON
-
-# جلب اسم الدومين من متغيرات Railway تلقائياً
-DOMAIN="${RAILWAY_PUBLIC_DOMAIN:-${RAILWAY_STATIC_URL:-your-domain.up.railway.app}}"
-ENCODED_PATH=$(echo "$WSPATH" | sed 's/\//%2F/g')
-
-# بناء رابط VLESS الجاهز
-VLESS_LINK="vless://${UUID}@${DOMAIN}:443?path=${ENCODED_PATH}&security=tls&encryption=none&type=ws#Railway-VLESS"
-
-# طباعة البيانات ورابط الاتصال في الـ Deploy Logs
-echo ""
-echo "=================================================================="
-echo "🚀 Xray VLESS (WebSocket + TLS) is Running!"
-echo "=================================================================="
-echo "🔑 UUID: ${UUID}"
-echo "🌐 Domain: ${DOMAIN}"
-echo "------------------------------------------------------------------"
-echo "🔗 COPY YOUR VLESS LINK BELOW:"
-echo ""
-echo "${VLESS_LINK}"
-echo ""
-echo "=================================================================="
-echo ""
-
-# تشغيل Xray
-exec /usr/local/bin/xray run -config /etc/xray/config.json
-EOF
-
-RUN chmod +x /entrypoint.sh
-
-# إعداد البورت الافتراضي وإضافته في EXPOSE ليتعرف عليه Railway
+# إعداد المتغيرات (يمكنك تغيير الـ UUID من إعدادات Railway)
+ENV UUID=8442ff27-8e79-4f27-b4d2-c3e6447789ea
+ENV WS_PATH=/vless-ws
 ENV PORT=8080
+ENV SNI=api.epicgames.dev
+
+# إنشاء سكريبت التشغيل وتوليد الرابط
+RUN echo '#!/bin/bash \n\
+# جلب الدومين الخاص بـ Railway \n\
+DOMAIN=${RAILWAY_PUBLIC_DOMAIN:-"your-app.up.railway.app"} \n\
+\n\
+# إنشاء ملف config.json \n\
+cat <<EOF > /etc/config.json \n\
+{ \n\
+    "log": {"loglevel": "none"}, \n\
+    "inbounds": [{ \n\
+        "port": $PORT, \n\
+        "protocol": "vless", \n\
+        "settings": { \n\
+            "clients": [{"id": "$UUID"}], \n\
+            "decryption": "none" \n\
+        }, \n\
+        "streamSettings": { \n\
+            "network": "ws", \n\
+            "wsSettings": {"path": "$WS_PATH"} \n\
+        } \n\
+    }], \n\
+    "outbounds": [{"protocol": "freedom"}] \n\
+} \n\
+EOF \n\
+\n\
+# توليد رابط VLESS مع SNI \n\
+echo -e "\n\n--- VLESS LINK READY ---" \n\
+echo "vless://$UUID@\$DOMAIN:443?path=\${WS_PATH//\//%2F}&security=tls&encryption=none&type=ws&sni=$SNI#Railway-EpicGames" \n\
+echo -e "------------------------\n\n" \n\
+\n\
+# تشغيل البرنامج \n\
+exec xray -config /etc/config.json' > /start.sh && chmod +x /start.sh
+
+# فتح البورت (Railway سيوجهه تلقائياً)
 EXPOSE $PORT
 
-# 4. تشغيل السكريبت عند بدء الـ Container
-ENTRYPOINT ["/entrypoint.sh"]
+CMD ["/bin/bash", "/start.sh"]
