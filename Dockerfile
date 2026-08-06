@@ -16,43 +16,19 @@ ENV WS_PATH=/vless-ws
 ENV PORT=8080
 ENV SNI=api.epicgames.dev
 
-# إنشاء سكربت التشغيل مباشرة
-RUN echo '#!/bin/bash \n\
-# تحديد الدومين (Railway يوفر PUBLIC_DOMAIN تلقائيا) \n\
-DOMAIN=${RAILWAY_PUBLIC_DOMAIN:-$RAILWAY_TCP_PROXY_DOMAIN} \n\
-[ -z "$DOMAIN" ] && DOMAIN="your-app.up.railway.app" \n\
-\n\
-# إنشاء الإعدادات \n\
-cat <<EOF > /etc/config.json \n\
-{ \n\
-    "log": {"loglevel": "warning"}, \n\
-    "inbounds": [{ \n\
-        "port": '$PORT', \n\
-        "protocol": "vless", \n\
-        "settings": { \n\
-            "clients": [{"id": "'$UUID'"}], \n\
-            "decryption": "none" \n\
-        }, \n\
-        "streamSettings": { \n\
-            "network": "ws", \n\
-            "wsSettings": {"path": "'$WS_PATH'"} \n\
-        } \n\
-    }], \n\
-    "outbounds": [{"protocol": "freedom"}] \n\
-} \n\
-EOF \n\
-\n\
-# طباعة الرابط في اللوجات \n\
-echo "---------------------------------------------------------------" \n\
-echo "VLESS LINK:" \n\
-echo "vless://$UUID@\$DOMAIN:443?path=${WS_PATH//\//%2F}&security=tls&encryption=none&type=ws&sni=$SNI#Railway-VLESS" \n\
-echo "---------------------------------------------------------------" \n\
-\n\
-# تشغيل Xray وجعله في الواجهة لضمان بقاء الحاوية Online \n\
-exec /usr/local/bin/xray -config /etc/config.json' > /start.sh && chmod +x /start.sh
+# بناء سكربت التشغيل سطر بسطر لتجنب أخطاء الـ EOF
+RUN echo '#!/bin/bash' > /start.sh && \
+    echo 'DOMAIN=${RAILWAY_PUBLIC_DOMAIN:-"your-app.up.railway.app"}' >> /start.sh && \
+    echo 'printf "{\n  \"log\": {\"loglevel\": \"none\"},\n  \"inbounds\": [{\n    \"port\": %s,\n    \"protocol\": \"vless\",\n    \"settings\": {\"clients\": [{\"id\": \"%s\"}], \"decryption\": \"none\"},\n    \"streamSettings\": {\"network\": \"ws\", \"wsSettings\": {\"path\": \"%s\"}}\n  }],\n  \"outbounds\": [{\"protocol\": \"freedom\"}]\n}" "$PORT" "$UUID" "$WS_PATH" > /etc/config.json' >> /start.sh && \
+    echo 'echo "---------------------------------------------------------------"' >> /start.sh && \
+    echo 'echo "VLESS LINK:"' >> /start.sh && \
+    echo 'echo "vless://$UUID@$DOMAIN:443?path=${WS_PATH//\//%2F}&security=tls&encryption=none&type=ws&sni=$SNI#Railway-VLESS"' >> /start.sh && \
+    echo 'echo "---------------------------------------------------------------"' >> /start.sh && \
+    echo 'exec xray -config /etc/config.json' >> /start.sh && \
+    chmod +x /start.sh
 
-# إخبار Railway بالبورت المستخدم
+# فتح البورت
 EXPOSE $PORT
 
-# البدء
+# تشغيل السكربت
 CMD ["/bin/bash", "/start.sh"]
