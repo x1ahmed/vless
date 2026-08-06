@@ -97,5 +97,9 @@ EOF
 
 RUN chmod +x /entrypoint.sh
 
+# إعداد البورت الافتراضي وإضافته في EXPOSE ليتعرف عليه Railway
+ENV PORT=8080
+EXPOSE $PORT
+
 # 4. تشغيل السكريبت عند بدء الـ Container
 ENTRYPOINT ["/entrypoint.sh"]
