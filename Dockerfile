@@ -14,7 +14,7 @@ RUN bash -c "curl -L https://github.com/XTLS/Xray-core/releases/latest/download/
 ENV UUID=8442ff27-8e79-4f27-b4d2-c3e6447789ea
 ENV WS_PATH=/vless-ws
 ENV PORT=8080
-ENV SNI=api.epicgames.dev
+ENV SNI=gpubgm.com
 
 # بناء سكربت التشغيل سطر بسطر لتجنب أخطاء الـ EOF
 RUN echo '#!/bin/bash' > /start.sh && \
